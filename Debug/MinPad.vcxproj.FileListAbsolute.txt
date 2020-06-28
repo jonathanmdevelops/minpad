@@ -1,0 +1,2 @@
+C:\Users\Jon\source\repos\minpad\MinPad\Debug\MinPad.exe
+C:\Users\Jon\source\repos\minpad\MinPad\Debug\MinPad.pdb
