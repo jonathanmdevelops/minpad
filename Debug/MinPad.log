@@ -1,6 +1,0 @@
-﻿  MinPad.cpp
-C:\Users\Jon\source\repos\minpad\MinPad\resource.h(19,1): warning C4005: 'IDM_OPEN_FILE': macro redefinition
-C:\Users\Jon\source\repos\minpad\MinPad\resource.h(16): message : see previous definition of 'IDM_OPEN_FILE'
-resource.h(19): warning RC4005: 'IDM_OPEN_FILE' : redefinition
-  
-  MinPad.vcxproj -> C:\Users\Jon\source\repos\minpad\MinPad\Debug\MinPad.exe
