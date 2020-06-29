@@ -10,19 +10,15 @@ WCHAR szWindowClass[] = L"ParentClass";
 WCHAR szEditWindowClass[] = L"Edit";
 HRESULT hr;
 
-// Handles to parent and edit Windows.
-HWND g_HWndParent;
-HWND g_HWndEdit;
-HFONT g_hFont;
-
-BOOL unsavedChanges = FALSE;
+BOOL bUnsavedChanges = FALSE;
 
 // Forward declarations of functions included in this code module:
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
-void                ProcessWindowPositions();
-void                ProcessOpenFile();
-void                LoadFileIntoMinPad(PWSTR pszFilePath);
+void                ProcessOpenFile(HWND);
+void                ProcessSaveFile();
+void                ProcessNewFile(HWND);
+void                LoadFileIntoMinPad(HWND, PWSTR);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
@@ -66,22 +62,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     MSG msg;
 
     // Main message loop:
-    BOOL bDone = FALSE;
-    while (!bDone)
+    while (GetMessage(&msg, NULL, 0, 0))
     {
-        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
         {
-            if (msg.message == WM_QUIT)
-            {
-                bDone = TRUE;
-            }
-            else  if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
-            {
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
         }
-
     }
 
     return (int) msg.wParam;
@@ -112,9 +99,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
       return FALSE;
    }
 
-   g_HWndParent = hWnd;
-
    ShowWindow(hWnd, nCmdShow);
+   UpdateWindow(hWnd);
 
    hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED |
        COINIT_DISABLE_OLE1DDE);
@@ -148,22 +134,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         if (hWndEdit == NULL)
         {
-            MessageBox(g_HWndParent, L"Could not Create Edit control!", L"Error", MB_OK | MB_ICONERROR);
-            printf("Terminal failure: Unable to open handle.\n GetLastError=%08x\n", GetLastError());
+            MessageBox(hWnd, L"Could not Create Edit control!", L"Error", MB_OK | MB_ICONERROR);
             PostQuitMessage(0);
         }
 
         hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-        SendMessage(hWndEdit, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(FALSE, 0));
-
-        g_HWndEdit = hWndEdit;
-        g_hFont = hFont;
-
-        ProcessWindowPositions();
     }
     case WM_SIZE:
     {
-        ProcessWindowPositions();
+        HWND hWndEdit;
+        RECT rcClient;
+
+        GetClientRect(hWnd, &rcClient);
+        hWndEdit = GetDlgItem(hWnd, IDC_EDIT);
+        SetWindowPos(hWndEdit, NULL, 0, 0, rcClient.right, rcClient.bottom, SWP_NOZORDER);
+    }
+    break;
+    case WM_PAINT:
+    {
     }
     break;
     case WM_COMMAND:
@@ -173,12 +161,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             switch (wmId)
             {
             case IDM_OPEN_FILE:
-                ProcessOpenFile();
+                ProcessOpenFile(hWnd);
                 break;
             case IDM_SAVE_FILE:
-                // Open file
+                ProcessSaveFile();
                 break;
             case IDM_NEW_FILE:
+                ProcessNewFile(hWnd);
                 break;
             case IDM_ABOUT:
                 DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
@@ -188,7 +177,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 switch (HIWORD(wParam))
                 {
                 case EN_CHANGE:
-                    unsavedChanges = TRUE;
+                    bUnsavedChanges = TRUE;
                     break;
                 }
             }
@@ -207,19 +196,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         PostQuitMessage(0);
         break;
     default:
-        return DefWindowProc(hWnd, message, wParam, lParam);
+        break;
     }
-    return 0;
-}
-
-void ProcessWindowPositions() {
-    RECT rcClient;
-    GetClientRect(g_HWndParent, &rcClient);
-    SetWindowPos(g_HWndEdit, NULL, 0, 0, rcClient.right, rcClient.bottom, SWP_NOZORDER);
+    return DefWindowProc(hWnd, message, wParam, lParam);;
 }
 
 // Process a call to open a file.
-void ProcessOpenFile() {
+void ProcessOpenFile(HWND hWnd) {
     IFileOpenDialog* pFileOpen;
 
     // Create the FileOpenDialog object.
@@ -244,7 +227,7 @@ void ProcessOpenFile() {
                 // Get the filename and load the content into the Window.
                 if (SUCCEEDED(hr))
                 {
-                    LoadFileIntoMinPad(pszFilePath);
+                    LoadFileIntoMinPad(hWnd, pszFilePath);
                     CoTaskMemFree(pszFilePath);
                 }
                 pItem->Release();
@@ -254,7 +237,7 @@ void ProcessOpenFile() {
     }
 }
 
-void LoadFileIntoMinPad(PWSTR pszFilePath) {
+void LoadFileIntoMinPad(HWND hWnd, PWSTR pszFilePath) {
 
     HANDLE hFile;
     DWORD dwBytesRead = 0;
@@ -270,7 +253,7 @@ void LoadFileIntoMinPad(PWSTR pszFilePath) {
 
     if (hFile == INVALID_HANDLE_VALUE)
     {
-        MessageBox(g_HWndParent, L"Could not get a handle to file.", L"Error", MB_OK | MB_ICONERROR);
+        MessageBox(hWnd, L"Could not get a handle to file.", L"Error", MB_OK | MB_ICONERROR);
         return;
     }
 
@@ -278,7 +261,7 @@ void LoadFileIntoMinPad(PWSTR pszFilePath) {
 
     if (dwFileSize == INVALID_FILE_SIZE) {
         CloseHandle(hFile);
-        MessageBox(g_HWndParent, L"Invalid File size.", L"Error", MB_OK | MB_ICONERROR);
+        MessageBox(hWnd, L"Invalid File size.", L"Error", MB_OK | MB_ICONERROR);
         return;
     }
 
@@ -292,15 +275,24 @@ void LoadFileIntoMinPad(PWSTR pszFilePath) {
         if (ReadFile(hFile, lpFileText, dwFileSize, &dwRead, NULL))
         {
             lpFileText[dwFileSize] = 0;
-            SetWindowTextA(g_HWndEdit, lpFileText);
-            ProcessWindowPositions();
+            HWND hWndEdit = GetDlgItem(hWnd, IDC_EDIT);
+            SetWindowTextA(hWndEdit, lpFileText);
         }
         else {
-            MessageBox(g_HWndParent, L"Failed to open file.", L"Error", MB_OK | MB_ICONERROR);
+            MessageBox(hWnd, L"Failed to open file.", L"Error", MB_OK | MB_ICONERROR);
         }
         GlobalFree(lpFileText);
     }
     CloseHandle(hFile);
+}
+
+void ProcessSaveFile() {
+
+}
+
+void ProcessNewFile(HWND hWnd) {
+    HWND hWndEdit = GetDlgItem(hWnd, IDC_EDIT);
+    SetWindowTextA(hWndEdit, "");
 }
 
 // Message handler for about box.
