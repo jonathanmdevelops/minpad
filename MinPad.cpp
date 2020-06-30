@@ -1,25 +1,29 @@
 #include "MinPad.h"
 #include "framework.h"
 
-#define MAX_LOADSTRING 100
+#define ID_EDITCHILD 100
 
-// Global Variables:
-HINSTANCE hInst;
+HINSTANCE g_hInst;
+HWND g_hWnd;
+
 WCHAR szTitle[] = L"MinPad";
 WCHAR szWindowClass[] = L"ParentClass";
 WCHAR szEditWindowClass[] = L"Edit";
-HRESULT hr;
 
+HRESULT hr;
 BOOL bUnsavedChanges = FALSE;
 
-// Forward declarations of functions included in this code module:
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
-void                ProcessOpenFile(HWND);
-void                ProcessSaveFile();
-void                ProcessNewFile(HWND);
-void                LoadFileIntoMinPad(HWND, PWSTR);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+void                ShowErrorDialog(HWND, const wchar_t*);
+void                SetEditWindowText(HWND, const wchar_t*);
+int                 CheckChanges();
+void                ProcessNewFile(HWND);
+void                ProcessOpenFile(HWND);
+void                ProcessSaveFile(HWND);
+void                LoadFileIntoMinPad(HWND, PWSTR);
+void                SaveFileToDisk(HWND, PWSTR);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -29,11 +33,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
-    // Initialize global strings
-    LoadString(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
-    LoadString(hInstance, IDC_MINPAD, szWindowClass, MAX_LOADSTRING);
-
-    WNDCLASSEXW wcex;
+    WNDCLASSEX wcex;
 
     wcex.cbSize = sizeof(WNDCLASSEX);
 
@@ -45,26 +45,25 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MINPAD));
     wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-    wcex.lpszMenuName = MAKEINTRESOURCEW(IDC_MINPAD);
+    wcex.lpszMenuName = MAKEINTRESOURCEW(IDR_MENU);
     wcex.lpszClassName = szWindowClass;
-    wcex.hIconSm = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
+    wcex.hIconSm = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_MINPAD));
 
-    RegisterClassExW(&wcex);
+    RegisterClassEx(&wcex);
 
-    // Perform application initialization:
     if (!InitInstance (hInstance, nCmdShow))
     {
         return FALSE;
     }
+    g_hInst = hInstance;
 
-    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_MINPAD));
+    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDR_ACCELERATOR));
 
     MSG msg;
 
-    // Main message loop:
     while (GetMessage(&msg, NULL, 0, 0))
     {
-        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
+        if (!TranslateAccelerator(g_hWnd, hAccelTable, &msg))
         {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
@@ -78,20 +77,16 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
 
    HWND hWnd = CreateWindowEx(
-       NULL,                   /* Extended possibilites for variation */
-       szWindowClass,         /* Classname */
-       szTitle,            /* Title Text */
-       WS_VISIBLE |
-       WS_SYSMENU |
-       WS_OVERLAPPEDWINDOW, /* default window */
-       CW_USEDEFAULT,       /* Windows decides the position */
-       CW_USEDEFAULT,       /* where the window ends up on the screen */
-       640,                 /* The programs width */
-       480,                  /* and height in pixels */
-       NULL,                 /* The window is not a child-window */
-       0,                /*  menu */
-       hInstance,       /* Program Instance handler */
-       NULL                 /* No Window Creation data */
+       NULL,
+       szWindowClass,
+       szTitle,
+       WS_VISIBLE | WS_SYSMENU | WS_OVERLAPPEDWINDOW,
+       CW_USEDEFAULT, CW_USEDEFAULT,
+       640, 480,
+       NULL,
+       0,
+       hInstance,
+       NULL
    );
 
    if (!hWnd)
@@ -101,7 +96,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
-
+   g_hWnd = hWnd;
    hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED |
        COINIT_DISABLE_OLE1DDE);
 
@@ -120,21 +115,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         hWndEdit = CreateWindowEx(
             WS_EX_CLIENTEDGE,
             szEditWindowClass,
-            L"",
-            WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_AUTOHSCROLL | ES_AUTOVSCROLL,
+            TEXT(""),
+            WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_AUTOHSCROLL | ES_AUTOVSCROLL | ES_WANTRETURN,
             1,
             1,
             100,
             100,
             hWnd,
-            (HMENU) IDC_EDIT,
-            GetModuleHandle(NULL),
+            (HMENU)ID_EDITCHILD,
+            (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE),
             NULL
         );
 
         if (hWndEdit == NULL)
         {
-            MessageBox(hWnd, L"Could not Create Edit control!", L"Error", MB_OK | MB_ICONERROR);
+            ShowErrorDialog(hWnd, TEXT("Could not Create Edit control."));
             PostQuitMessage(0);
         }
 
@@ -146,33 +141,31 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         RECT rcClient;
 
         GetClientRect(hWnd, &rcClient);
-        hWndEdit = GetDlgItem(hWnd, IDC_EDIT);
+        hWndEdit = GetDlgItem(hWnd, ID_EDITCHILD);
         SetWindowPos(hWndEdit, NULL, 0, 0, rcClient.right, rcClient.bottom, SWP_NOZORDER);
-    }
-    break;
-    case WM_PAINT:
-    {
     }
     break;
     case WM_COMMAND:
         {
             int wmId = LOWORD(wParam);
-            // Parse the menu selections:
             switch (wmId)
             {
-            case IDM_OPEN_FILE:
+            case IDM_FILE_OPEN:
+            case ID_ACCELERATOR_OPEN:
                 ProcessOpenFile(hWnd);
                 break;
-            case IDM_SAVE_FILE:
-                ProcessSaveFile();
+            case IDM_FILE_SAVE:
+            case ID_ACCELERATOR_SAVE:
+                ProcessSaveFile(hWnd);
                 break;
-            case IDM_NEW_FILE:
+            case IDM_FILE_NEW:
+            case ID_ACCELERATOR_NEW:
                 ProcessNewFile(hWnd);
                 break;
-            case IDM_ABOUT:
-                DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
+            case IDM_HELP_ABOUT:
+                DialogBox(g_hInst, MAKEINTRESOURCE(IDD_ABOUT), hWnd, About);
                 break;
-            case IDC_EDIT:
+            case ID_EDITCHILD:
             {
                 switch (HIWORD(wParam))
                 {
@@ -182,10 +175,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 }
             }
             break;
-            case IDM_EXIT:
-                //TODO Add unsaved changes check
-                DestroyWindow(hWnd);
-                break;
             default:
                 return DefWindowProc(hWnd, message, wParam, lParam);
             }
@@ -201,20 +190,62 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     return DefWindowProc(hWnd, message, wParam, lParam);;
 }
 
-// Process a call to open a file.
+
+INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    UNREFERENCED_PARAMETER(lParam);
+    switch (message)
+    {
+    case WM_INITDIALOG:
+        return (INT_PTR)TRUE;
+
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDD_ABOUT_OK || LOWORD(wParam) == IDCANCEL)
+        {
+            EndDialog(hDlg, LOWORD(wParam));
+            return (INT_PTR)TRUE;
+        }
+        break;
+    }
+    return (INT_PTR)FALSE;
+}
+
+void ShowErrorDialog(HWND hWnd, const wchar_t* wczErrorText) {
+    MessageBox(hWnd, wczErrorText, TEXT("Error"), MB_OK | MB_ICONERROR);
+}
+
+void SetEditWindowText(HWND hWnd, const wchar_t* wczText) {
+    HWND hWndEdit = GetDlgItem(hWnd, ID_EDITCHILD);
+    SendMessage(hWndEdit, WM_SETTEXT, 0, (LPARAM) wczText);
+}
+
+int CheckChanges() {
+    if (bUnsavedChanges) {
+        return MessageBox(g_hWnd, TEXT("Would you like to continue?"), TEXT("Unsaved Changes"), MB_YESNO | MB_ICONINFORMATION);
+    }
+    return IDYES;
+}
+
+void ProcessNewFile(HWND hWnd) {
+    if (CheckChanges() != IDYES) {
+        return;
+    }
+    SetEditWindowText(hWnd, TEXT(""));
+}
+
 void ProcessOpenFile(HWND hWnd) {
+    if (CheckChanges() != IDYES) {
+        return;
+    }
     IFileOpenDialog* pFileOpen;
 
-    // Create the FileOpenDialog object.
     hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL,
         IID_IFileOpenDialog, reinterpret_cast<void**>(&pFileOpen));
 
     if (SUCCEEDED(hr))
     {
-        // Show the Open dialog box.
         hr = pFileOpen->Show(NULL);
 
-        // Get the file name from the dialog box.
         if (SUCCEEDED(hr))
         {
             IShellItem* pItem;
@@ -224,7 +255,6 @@ void ProcessOpenFile(HWND hWnd) {
                 PWSTR pszFilePath;
                 hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
 
-                // Get the filename and load the content into the Window.
                 if (SUCCEEDED(hr))
                 {
                     LoadFileIntoMinPad(hWnd, pszFilePath);
@@ -242,18 +272,19 @@ void LoadFileIntoMinPad(HWND hWnd, PWSTR pszFilePath) {
     HANDLE hFile;
     DWORD dwBytesRead = 0;
     DWORD dwFileSize;
+    DWORD dwAllocationSize;
 
-    hFile = CreateFile(pszFilePath, // file to open
-        GENERIC_READ,          // open for reading
-        FILE_SHARE_READ,       // share for reading
-        NULL,                  // default security
-        OPEN_EXISTING,         // existing file only
-        FILE_ATTRIBUTE_NORMAL, // normal file
-        NULL);                 // no attr. template
+    hFile = CreateFile(pszFilePath,
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL);
 
     if (hFile == INVALID_HANDLE_VALUE)
     {
-        MessageBox(hWnd, L"Could not get a handle to file.", L"Error", MB_OK | MB_ICONERROR);
+        ShowErrorDialog(hWnd, TEXT("Could not get a handle to file."));
         return;
     }
 
@@ -261,56 +292,111 @@ void LoadFileIntoMinPad(HWND hWnd, PWSTR pszFilePath) {
 
     if (dwFileSize == INVALID_FILE_SIZE) {
         CloseHandle(hFile);
-        MessageBox(hWnd, L"Invalid File size.", L"Error", MB_OK | MB_ICONERROR);
+        ShowErrorDialog(hWnd, TEXT("Invalid file size."));
         return;
     }
+    dwAllocationSize = 2 * (dwFileSize + 1);
+    wchar_t* wczFileText;
 
-    // Allocate memory from the heap of an appropriate size.
-    LPSTR lpFileText;
-    lpFileText = (char*)GlobalAlloc(GPTR, dwFileSize + 1);
+    wczFileText = (wchar_t*) HeapAlloc(GetProcessHeap(), 0, dwAllocationSize);
 
-    if (lpFileText != NULL)
+    if (wczFileText != NULL)
     {
         DWORD dwRead;
-        if (ReadFile(hFile, lpFileText, dwFileSize, &dwRead, NULL))
+        if (ReadFile(hFile, wczFileText, dwAllocationSize, &dwRead, NULL))
         {
-            lpFileText[dwFileSize] = 0;
-            HWND hWndEdit = GetDlgItem(hWnd, IDC_EDIT);
-            SetWindowTextA(hWndEdit, lpFileText);
+            SetEditWindowText(hWnd, wczFileText);
         }
         else {
-            MessageBox(hWnd, L"Failed to open file.", L"Error", MB_OK | MB_ICONERROR);
+            ShowErrorDialog(hWnd, TEXT("Failed to read file."));
         }
-        GlobalFree(lpFileText);
+        HeapFree(GetProcessHeap(), 0, wczFileText);
+    }
+    else {
+        ShowErrorDialog(hWnd, TEXT("Failed to allocate memory."));
     }
     CloseHandle(hFile);
 }
 
-void ProcessSaveFile() {
+void ProcessSaveFile(HWND hWnd) {
+    IFileSaveDialog* pFileSave;
 
-}
+    hr = CoCreateInstance(CLSID_FileSaveDialog, NULL, CLSCTX_ALL,
+        IID_IFileSaveDialog, reinterpret_cast<void**>(&pFileSave));
 
-void ProcessNewFile(HWND hWnd) {
-    HWND hWndEdit = GetDlgItem(hWnd, IDC_EDIT);
-    SetWindowTextA(hWndEdit, "");
-}
-
-// Message handler for about box.
-INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    UNREFERENCED_PARAMETER(lParam);
-    switch (message)
+    if (SUCCEEDED(hr))
     {
-    case WM_INITDIALOG:
-        return (INT_PTR)TRUE;
+        hr = pFileSave->Show(hWnd);
 
-    case WM_COMMAND:
-        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
+        if (SUCCEEDED(hr))
         {
-            EndDialog(hDlg, LOWORD(wParam));
-            return (INT_PTR)TRUE;
+            IShellItem* pItem;
+            hr = pFileSave->GetResult(&pItem);
+            if (SUCCEEDED(hr))
+            {
+                PWSTR pszFilePath;
+                hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
+
+                if (SUCCEEDED(hr))
+                {
+                    SaveFileToDisk(hWnd, pszFilePath);
+                    CoTaskMemFree(pszFilePath);
+                }
+                pItem->Release();
+            }
         }
-        break;
+        pFileSave->Release();
     }
-    return (INT_PTR)FALSE;
+}
+
+void SaveFileToDisk(HWND hWnd, PWSTR pszFilePath) {
+    HWND hWndEdit = GetDlgItem(hWnd, ID_EDITCHILD);
+    HANDLE hFile;
+    DWORD dwTextLength;
+    DWORD dwAllocationLength;
+
+    DWORD dwBytesWritten = 0;
+    BOOL bErrorFlag = FALSE;
+
+    hFile = CreateFile(pszFilePath,
+        GENERIC_WRITE,
+        0,
+        NULL,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL);
+
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+        ShowErrorDialog(hWnd, TEXT("Could not get handle to file."));
+        return;
+    }
+
+    dwTextLength = GetWindowTextLength(hWndEdit);
+    dwAllocationLength = 2 * (dwTextLength + 1);
+
+    wchar_t* wczFileText;
+
+    wczFileText = (wchar_t*)HeapAlloc(GetProcessHeap(), 0, dwAllocationLength);
+
+    if (wczFileText != NULL)
+    {
+        if (GetWindowText(hWndEdit, wczFileText, dwTextLength + 1))
+        {
+            if (!WriteFile(hFile, wczFileText, dwAllocationLength, &dwBytesWritten, NULL)) {
+                ShowErrorDialog(hWnd, TEXT("Failed to write file."));
+            }
+            else {
+                bUnsavedChanges = FALSE;
+            }
+        }
+        else {
+            ShowErrorDialog(hWnd, TEXT("Failed to get text from Window."));
+        }
+        HeapFree(GetProcessHeap(), 0, wczFileText);
+    }
+    else {
+        ShowErrorDialog(hWnd, TEXT("Failed to allocate memory."));
+    }
+    CloseHandle(hFile);
 }
