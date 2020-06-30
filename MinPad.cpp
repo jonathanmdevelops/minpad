@@ -270,8 +270,8 @@ void ProcessOpenFile(HWND hWnd) {
 void LoadFileIntoMinPad(HWND hWnd, PWSTR pszFilePath) {
 
     HANDLE hFile;
-    DWORD dwBytesRead = 0;
     DWORD dwFileSize;
+    DWORD dwRead;
     DWORD dwAllocationSize;
 
     hFile = CreateFile(pszFilePath,
@@ -295,16 +295,16 @@ void LoadFileIntoMinPad(HWND hWnd, PWSTR pszFilePath) {
         ShowErrorDialog(hWnd, TEXT("Invalid file size."));
         return;
     }
-    dwAllocationSize = 2 * (dwFileSize + 1);
+    dwAllocationSize = sizeof(wchar_t) * (dwFileSize + 1);
     wchar_t* wczFileText;
 
     wczFileText = (wchar_t*) HeapAlloc(GetProcessHeap(), 0, dwAllocationSize);
 
     if (wczFileText != NULL)
     {
-        DWORD dwRead;
         if (ReadFile(hFile, wczFileText, dwAllocationSize, &dwRead, NULL))
         {
+            unsigned int x = sizeof(wczFileText);
             SetEditWindowText(hWnd, wczFileText);
         }
         else {
@@ -373,7 +373,7 @@ void SaveFileToDisk(HWND hWnd, PWSTR pszFilePath) {
     }
 
     dwTextLength = GetWindowTextLength(hWndEdit);
-    dwAllocationLength = 2 * (dwTextLength + 1);
+    dwAllocationLength = sizeof(wchar_t) * (dwTextLength + 1);
 
     wchar_t* wczFileText;
 
